@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package message;
+
+service grpcService{
+ rpc sendParameter(SelectedParameters) returns (GlobalParameter) {}
+ rpc sendSingleParameter(SelectedParameter) returns (EmptyResponse) {}
+ rpc randomSample(RequestRandomIndices) returns (ResponseRandomIndices) {}
+}
+
+message SelectedParameter {
+  bytes parameter = 1;
+}
+
+message EmptyResponse {
+  string message = 1;
+}
+
+message SelectedParameters {
+  repeated bytes parameters = 1;
+}
+
+message GlobalParameter {
+  bytes parameter = 1;
+}
+
+message RequestRandomIndices {
+  int32 num_clients = 1;  // 디바이스 개수
+  int32 num_samples = 2;  // 샘플링할 개수
+}
+
+message ResponseRandomIndices {
+  repeated int32 device_indices = 1;  // 선택된 디바이스 인덱스 리스트
+}
