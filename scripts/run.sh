@@ -4,9 +4,8 @@
 # for selection in wait score
 # do
 
-for dataset in cifar10 FashionMNIST MNIST
+for dataset in cifar10/cifar10 FashionMNIST/FashionMNIST MNIST/MNIST
 do
-
 
 python -u ../run.py \
  --model_name cnn \
