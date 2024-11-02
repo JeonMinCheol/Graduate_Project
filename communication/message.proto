@@ -3,25 +3,27 @@ syntax = "proto3";
 package message;
 
 service grpcService{
- rpc sendParameter(SelectedParameters) returns (GlobalParameter) {}
- rpc sendSingleParameter(SelectedParameter) returns (EmptyResponse) {}
+ rpc sendState(SelectedStates) returns (GlobalState) {}
+ rpc sendSingleState(SelectedState) returns (EmptyResponse) {}
  rpc randomSample(RequestRandomIndices) returns (ResponseRandomIndices) {}
 }
 
-message SelectedParameter {
-  bytes parameter = 1;
+message SelectedState {
+  bytes state = 1;
 }
 
 message EmptyResponse {
   string message = 1;
 }
 
-message SelectedParameters {
-  repeated bytes parameters = 1;
+message SelectedStates {
+  bytes state = 1;
+  string setting = 2;
+  repeated float weights = 3;
 }
 
-message GlobalParameter {
-  bytes parameter = 1;
+message GlobalState {
+  bytes state = 1;
 }
 
 message RequestRandomIndices {

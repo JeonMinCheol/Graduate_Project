@@ -14,14 +14,14 @@ class grpcServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.sendParameter = channel.unary_unary(
-                '/message.grpcService/sendParameter',
-                request_serializer=message__pb2.SelectedParameters.SerializeToString,
-                response_deserializer=message__pb2.GlobalParameter.FromString,
+        self.sendState = channel.unary_unary(
+                '/message.grpcService/sendState',
+                request_serializer=message__pb2.SelectedStates.SerializeToString,
+                response_deserializer=message__pb2.GlobalState.FromString,
                 )
-        self.sendSingleParameter = channel.unary_unary(
-                '/message.grpcService/sendSingleParameter',
-                request_serializer=message__pb2.SelectedParameter.SerializeToString,
+        self.sendSingleState = channel.unary_unary(
+                '/message.grpcService/sendSingleState',
+                request_serializer=message__pb2.SelectedState.SerializeToString,
                 response_deserializer=message__pb2.EmptyResponse.FromString,
                 )
         self.randomSample = channel.unary_unary(
@@ -34,13 +34,13 @@ class grpcServiceStub(object):
 class grpcServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def sendParameter(self, request, context):
+    def sendState(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def sendSingleParameter(self, request, context):
+    def sendSingleState(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -55,14 +55,14 @@ class grpcServiceServicer(object):
 
 def add_grpcServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'sendParameter': grpc.unary_unary_rpc_method_handler(
-                    servicer.sendParameter,
-                    request_deserializer=message__pb2.SelectedParameters.FromString,
-                    response_serializer=message__pb2.GlobalParameter.SerializeToString,
+            'sendState': grpc.unary_unary_rpc_method_handler(
+                    servicer.sendState,
+                    request_deserializer=message__pb2.SelectedStates.FromString,
+                    response_serializer=message__pb2.GlobalState.SerializeToString,
             ),
-            'sendSingleParameter': grpc.unary_unary_rpc_method_handler(
-                    servicer.sendSingleParameter,
-                    request_deserializer=message__pb2.SelectedParameter.FromString,
+            'sendSingleState': grpc.unary_unary_rpc_method_handler(
+                    servicer.sendSingleState,
+                    request_deserializer=message__pb2.SelectedState.FromString,
                     response_serializer=message__pb2.EmptyResponse.SerializeToString,
             ),
             'randomSample': grpc.unary_unary_rpc_method_handler(
@@ -81,7 +81,7 @@ class grpcService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def sendParameter(request,
+    def sendState(request,
             target,
             options=(),
             channel_credentials=None,
@@ -91,14 +91,14 @@ class grpcService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/message.grpcService/sendParameter',
-            message__pb2.SelectedParameters.SerializeToString,
-            message__pb2.GlobalParameter.FromString,
+        return grpc.experimental.unary_unary(request, target, '/message.grpcService/sendState',
+            message__pb2.SelectedStates.SerializeToString,
+            message__pb2.GlobalState.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def sendSingleParameter(request,
+    def sendSingleState(request,
             target,
             options=(),
             channel_credentials=None,
@@ -108,8 +108,8 @@ class grpcService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/message.grpcService/sendSingleParameter',
-            message__pb2.SelectedParameter.SerializeToString,
+        return grpc.experimental.unary_unary(request, target, '/message.grpcService/sendSingleState',
+            message__pb2.SelectedState.SerializeToString,
             message__pb2.EmptyResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
