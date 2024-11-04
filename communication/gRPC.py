@@ -31,14 +31,22 @@ class gRPCClient(object):
         return self.stub.randomSample(request)
     
     # selection=wait 설정에서 파라미터 전송을 위해 사용
-    def sendStates(self, states, setting, weights):
+    def sendStates(self, states, setting, weights, cluster_dict, device_dict, update_dict):
         try:
             serialized_states = pickle.dumps(states)
-            request = pb2.SelectedStates(state=serialized_states, setting=setting, weights=weights)
+            serialized_weights = pickle.dumps(weights)
+            serialized_cluster_dict = pickle.dumps(cluster_dict)
+            serialized_device_dict = pickle.dumps(device_dict)
+            serialized_update_dict = pickle.dumps(update_dict)
+            print(states.keys())
+            print(cluster_dict.keys())
+            print(device_dict.keys())
+            print(update_dict.keys())
+            print(weights.keys())
+            
+            request = pb2.SelectedStates(state=serialized_states, setting=setting, weights=serialized_weights, cluster_dict=serialized_cluster_dict, device_dict=serialized_device_dict, update_dict=serialized_update_dict)
             return self.stub.sendState(request)
         except Exception as e:
-            print(setting)
-            print(weights)
             print(traceback.format_exc())
     
     # selection=score 설정에서 파라미터 전송을 위해 사용
@@ -73,17 +81,86 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
     def sendState(self, request, context):
         try:
             client_states = pickle.loads(request.state)
+            print(client_states.keys())
+            cluster_dict = pickle.loads(request.cluster_dict)
+            print(cluster_dict.keys())
+            device_dict = pickle.loads(request.device_dict)
+            print(device_dict.keys())
+            update_dict = pickle.loads(request.update_dict)
+            print(update_dict.keys())
+            weights = pickle.loads(request.weights)
+            print(weights.keys())
             setting = request.setting
-            weights = request.weights
-            keys = client_states[0].keys()
-            model_state = copy.deepcopy(client_states[0])
-            for key in keys:
-                model_state[key] = torch.zeros_like(model_state[key].cpu().float()) 
-                for idx in range(len(client_states)):
-                    factor = 1 / len(client_states) if setting != "fednova" and setting != "cluster" else weights[idx] / sum(weights)
-                    model_state[key] += client_states[idx][key].cpu().float() * factor
             
-            self.global_state = model_state
+            if setting == "cluster":
+                cluster_steps = {} # cluster: total_steps
+                rebalanced_update_dict = {} # 업데이트 순서 반전
+                total_update = sum(list(update_dict.values()))
+                print(update_dict.values())
+                
+                # 모델 생성
+                model_state = copy.deepcopy(list(client_states.values())[0])
+                keys = model_state.keys()
+                for key in keys:
+                    model_state[key] = torch.zeros_like(model_state[key].cpu().float()) 
+                    
+                print("# 모델 생성")
+                
+                # cluster_update_cnt 초기화
+                while len(list(rebalanced_update_dict.keys())) < len(list(update_dict.keys())):
+                    max_update = -1
+                    max_cluster = -1
+                    min_update = 9999999
+                    min_cluster = 9999999
+                    visited = [False for _ in range(len(list(update_dict.keys())) + 1)]
+                    
+                    for cluster, update in list(update_dict.items()): 
+                        print(cluster)
+                        if min_update > update and visited[cluster] == False:
+                            min_update = update
+                            min_cluster = cluster
+                            
+                        if max_update < update and rebalanced_update_dict.get(max_cluster) is None:
+                            max_update = update
+                            max_cluster = cluster
+                            
+                    rebalanced_update_dict[max_cluster] = min_update
+                    print(rebalanced_update_dict.items())
+                    visited[min_cluster] = True
+                print("# cluster_update_cnt 초기화")
+                
+                # cluster_steps 초기화
+                for device, cluster in list(device_dict.items()):
+                    if cluster_steps.get(cluster) is None:
+                        cluster_steps[cluster] = 0
+                    
+                    cluster_steps[cluster] = cluster_steps[cluster] + weights[device]
+                print("# cluster_steps 초기화")
+                
+                print(rebalanced_update_dict.keys())
+                # Aggregation 진행 (가중치 = device_step * update / (cluster_steps[cluster] * total_update))
+                for cluster, devices in list(cluster_dict.items()):
+                    for device in list(devices):
+                        device_step = weights[device]
+                        update = rebalanced_update_dict[cluster]
+                        factor = device_step * update / (cluster_steps[cluster] * total_update)
+                    
+                        for key in keys:
+                            model_state[key] += client_states[idx][key].cpu().float() * factor
+            else:
+                keys = client_states[0].keys()
+                model_state = copy.deepcopy(client_states[0])
+                
+                for key in keys:
+                    model_state[key] = torch.zeros_like(model_state[key].cpu().float()) 
+                    for idx in range(len(client_states)):
+                        if setting == "fednova":
+                            factor = weights[idx] / sum(weights)
+                        else:
+                            factor = 1 / len(client_states)
+                        model_state[key] += client_states[idx][key].cpu().float() * factor
+                
+                self.global_state = model_state
                     
         except Exception as e:
             print(traceback.format_exc())

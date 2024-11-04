@@ -5,7 +5,6 @@ from torch.utils.data import DataLoader
 import random
 import torch.nn.functional as F
 from communication.gRPC import *
-random.seed(1)
 
 # 입력받은 설정의 클라이언트 생성
 class Client:
@@ -23,11 +22,12 @@ class Client:
         self.clients = self._createClient()
         
     def _setup(self):
+        random.seed(1)
         setting = []
         # 지연시간, 통신시간, 배치크기
         for i in range(self.n_clients):
             if self.args.is_testing:
-                setting.append([0, 0, self.args.batch_size])
+                setting.append([0, random.random(), self.args.batch_size])
                 continue
             
             setting.append([0.5 * i if i > self.n_clients / 2 else (i + 1) / 4, random.random(), self.args.batch_size])

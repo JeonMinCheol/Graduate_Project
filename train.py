@@ -51,7 +51,7 @@ def train_local_client_prox(clients, data_loader, epochs, client_id, conn, mu, e
         if model_updated == False:
             time.sleep(transfer_delay) # 전송 딜레이
             conn.send((model.state_dict(), running_loss/len(data_loader))) # 부모에게 학습된 모델 전송
-            # print(f"Client {client_id} - iter [{train_round}], Loss: {running_loss/len(data_loader)}")
+            print(f"Client {client_id} - iter [{train_round}], Loss: {running_loss/len(data_loader)}")
 
 def train_local_client_nova(clients, data_loader, epochs, client_id, conn, event):
     train_delay, transfer_delay, batch_size, model, optimizer, loss_fn, host, idx, rounds, device_id = clients[client_id]
@@ -84,6 +84,7 @@ def train_local_client_nova(clients, data_loader, epochs, client_id, conn, event
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
+                tau += 1
                 
             time.sleep(train_delay) # 학습 딜레이
             
@@ -91,10 +92,10 @@ def train_local_client_nova(clients, data_loader, epochs, client_id, conn, event
             time.sleep(transfer_delay) # 전송 딜레이
             conn.send((model.state_dict(), tau, running_loss/len(data_loader))) # 부모에게 학습된 모델 전송
             
-            # print(f"Client {client_id} - iter [{train_round}], Loss: {running_loss/len(data_loader)}, Steps: {tau}")
+            print(f"Client {client_id} - iter [{train_round}], Loss: {running_loss/len(data_loader)}, Steps: {tau}")
             
             
-def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_class, event):
+def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_class, mu, event):
     train_delay, transfer_delay, batch_size, model, optimizer, loss_fn, host, idx, rounds, device_id = clients[client_id]
     device = f"cuda:{device_id}" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
@@ -109,17 +110,19 @@ def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_
     
     while True:
         train_round += 1
+            
         for epoch in range(epochs):
             model_updated = False
             running_loss = 0.0
-            
+        
             if conn.poll(timeout=0.01): 
-                global_model = conn.recv()
-                model.load_state_dict(global_model)
-                global_model = model
-                model_updated = True
-                train_round, tau = 0, 0
-                break
+                state, selected = conn.recv()
+                global_model.load_state_dict(state)
+                if selected:
+                    model.load_state_dict(state)
+                    model_updated = True
+                    train_round, tau = 0, 0
+                    break
             
             for images, labels in data_loader:
                 
@@ -134,10 +137,10 @@ def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_
                 prox_term = 0
                 
                 # Proximal term (||w_t - w_global||^2)
-                #for param, global_param in zip(model.parameters(), global_model.parameters()):
-                #    prox_term += ((param - global_param) ** 2).sum()
-                #prox_term = (0.3 / 2) * prox_term
-                
+                for param, global_param in zip(model.parameters(), global_model.parameters()):
+                    prox_term += ((param - global_param) ** 2).sum()
+                    
+                loss = loss + (mu / 2) * prox_term
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
@@ -146,10 +149,9 @@ def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_
             if all_labels is None:
                 all_labels = torch.cat(label_counts)
                 all_labels = torch.bincount(input=all_labels, minlength=n_class).cpu().numpy()
-                #print(all_labels/sum(all_labels))
             time.sleep(train_delay) # 학습 딜레이
         
         if model_updated == False:
             time.sleep(transfer_delay) # 전송 딜레이
             conn.send((model.state_dict(), tau, running_loss/len(data_loader), all_labels)) # 부모에게 학습된 모델 전송
-            print(f"Client {client_id} - iter [{train_round}], Loss: {running_loss/len(data_loader)}, step: {tau}")
+            # print(f"Client {client_id} - iter [{train_round}], Loss: {running_loss/len(data_loader)}, step: {tau}")

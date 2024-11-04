@@ -19,7 +19,10 @@ message EmptyResponse {
 message SelectedStates {
   bytes state = 1;
   string setting = 2;
-  repeated float weights = 3;
+  bytes weights = 3;
+  bytes cluster_dict = 4;
+  bytes device_dict = 5;
+  bytes update_dict = 6;
 }
 
 message GlobalState {

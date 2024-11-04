@@ -1,21 +1,21 @@
 import torch
 from sklearn.metrics import silhouette_score
 import numpy as np
-import time
+from sklearn.metrics.pairwise import cosine_similarity
 import math
 import utils.utils as util
 
+# 합칠 때 클러스터의 data distribution도 고려할 것
 def make_clusters(clusters, states, steps, min_cluster):
     cluster_score_buffer = []
     cluster_idx_buffer = []
-    state_buffer = []
+    state_buffer = [states]
+    sil_scores = []
     
     while len(clusters) >= 2:
         score_arr = calc_scores(clusters, states) # 각 클러스터 간 유사도 점수 계산 
-        cluster_score_buffer.append(score_arr) 
-        state_buffer.append(states)
-        
-        buffer, sil_scores = [], []
+        cluster_score_buffer.append(score_arr)
+        buffer = []
         visited = [False for _ in range(len(clusters))]
         
         for idx1, cluster1 in enumerate(clusters):
@@ -50,6 +50,7 @@ def make_clusters(clusters, states, steps, min_cluster):
                 new_states[idx] = states[cluster[0]]
         
         states = new_states
+        state_buffer.append(list(states.values()))
         clusters = states.keys()
         
     for pair in zip(cluster_score_buffer, cluster_idx_buffer):
@@ -85,29 +86,37 @@ def calc_scores(devices, states):
     score_arr = [[0 for _ in range(len(devices))] for _ in range(len(devices))]
     for k1, k2 in enumerate(devices):
         for j1, j2 in enumerate(devices):
-            if k1 == j1: continue
+            if k1 < j1: 
+                break
             param1 = states[k2]; param2 = states[j2]
             C, L1 = calculate_similarity_and_distance(param1, param2)
             score = (1 + C) / (1 + L1)
-            score_arr[k1][j1] = score
-            
-    return score_arr
+            if k1 == j1: score = torch.tensor(0)
+            score_arr[k1][j1] = score.item()
+            score_arr[j1][k1] = score.item()
+    
+    return np.array(score_arr)
 
-# 두 모델의 파라미터 리스트를 입력으로 받습니다.
+# 두 모델의 파라미터 리스트 or 레이블 벡터를 입력으로 받습니다.
 def calculate_similarity_and_distance(params1, params2):
     # 파라미터 텐서를 직렬화하여 하나의 벡터로 만듭니다.
-    tensors1 = list(params1.values())  # OrderedDict에서 텐서 값 추출
-    tensors2 = list(params2.values())
+    tensors1 = torch.tensor(params1, dtype=torch.float32)
+    tensors2 = torch.tensor(params2, dtype=torch.float32)
 
     # Flattening
-    vector1 = torch.cat([p.view(-1) for p in tensors1]).cpu()
-    vector2 = torch.cat([p.view(-1) for p in tensors2]).cpu()
+    tensors1 = torch.cat([p.view(-1) for p in tensors1]).cpu()
+    tensors2 = torch.cat([p.view(-1) for p in tensors2]).cpu()
     
-    # 코사인 유사도 계산
-    cosine_similarity = torch.dot(vector1, vector2) / (torch.norm(vector1) * torch.norm(vector2))
+    dot_product = torch.dot(tensors1, tensors2)
+    
+    norm_1 = torch.norm(tensors1, p=2)
+    norm_2 = torch.norm(tensors2, p=2)
+    
+    cosine_similarity = dot_product / (norm_1 * norm_2)
+
     # L1 거리 계산
-    vector1_norm = vector1 / vector1.norm(p=1)
-    vector2_norm = vector2 / vector2.norm(p=1)
+    vector1_norm = tensors1 / norm_1
+    vector2_norm = tensors2 / norm_2
     l1_distance = torch.norm(vector1_norm - vector2_norm, p=1).item()
     return cosine_similarity, l1_distance
 

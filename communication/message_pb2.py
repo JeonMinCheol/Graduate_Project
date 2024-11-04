@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rmessage.proto\x12\x07message\"\x1e\n\rSelectedState\x12\r\n\x05state\x18\x01 \x01(\x0c\" \n\rEmptyResponse\x12\x0f\n\x07message\x18\x01 \x01(\t\"A\n\x0eSelectedStates\x12\r\n\x05state\x18\x01 \x01(\x0c\x12\x0f\n\x07setting\x18\x02 \x01(\t\x12\x0f\n\x07weights\x18\x03 \x03(\x02\"\x1c\n\x0bGlobalState\x12\r\n\x05state\x18\x01 \x01(\x0c\"@\n\x14RequestRandomIndices\x12\x13\n\x0bnum_clients\x18\x01 \x01(\x05\x12\x13\n\x0bnum_samples\x18\x02 \x01(\x05\"/\n\x15ResponseRandomIndices\x12\x16\n\x0e\x64\x65vice_indices\x18\x01 \x03(\x05\x32\xe1\x01\n\x0bgrpcService\x12<\n\tsendState\x12\x17.message.SelectedStates\x1a\x14.message.GlobalState\"\x00\x12\x43\n\x0fsendSingleState\x12\x16.message.SelectedState\x1a\x16.message.EmptyResponse\"\x00\x12O\n\x0crandomSample\x12\x1d.message.RequestRandomIndices\x1a\x1e.message.ResponseRandomIndices\"\x00\x62\x06proto3'
+  serialized_pb=b'\n\rmessage.proto\x12\x07message\"\x1e\n\rSelectedState\x12\r\n\x05state\x18\x01 \x01(\x0c\" \n\rEmptyResponse\x12\x0f\n\x07message\x18\x01 \x01(\t\"\x81\x01\n\x0eSelectedStates\x12\r\n\x05state\x18\x01 \x01(\x0c\x12\x0f\n\x07setting\x18\x02 \x01(\t\x12\x0f\n\x07weights\x18\x03 \x01(\x0c\x12\x14\n\x0c\x63luster_dict\x18\x04 \x01(\x0c\x12\x13\n\x0b\x64\x65vice_dict\x18\x05 \x01(\x0c\x12\x13\n\x0bupdate_dict\x18\x06 \x01(\x0c\"\x1c\n\x0bGlobalState\x12\r\n\x05state\x18\x01 \x01(\x0c\"@\n\x14RequestRandomIndices\x12\x13\n\x0bnum_clients\x18\x01 \x01(\x05\x12\x13\n\x0bnum_samples\x18\x02 \x01(\x05\"/\n\x15ResponseRandomIndices\x12\x16\n\x0e\x64\x65vice_indices\x18\x01 \x03(\x05\x32\xe1\x01\n\x0bgrpcService\x12<\n\tsendState\x12\x17.message.SelectedStates\x1a\x14.message.GlobalState\"\x00\x12\x43\n\x0fsendSingleState\x12\x16.message.SelectedState\x1a\x16.message.EmptyResponse\"\x00\x12O\n\x0crandomSample\x12\x1d.message.RequestRandomIndices\x1a\x1e.message.ResponseRandomIndices\"\x00\x62\x06proto3'
 )
 
 
@@ -113,8 +113,29 @@ _SELECTEDSTATES = _descriptor.Descriptor(
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
       name='weights', full_name='message.SelectedStates.weights', index=2,
-      number=3, type=2, cpp_type=6, label=3,
-      has_default_value=False, default_value=[],
+      number=3, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='cluster_dict', full_name='message.SelectedStates.cluster_dict', index=3,
+      number=4, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='device_dict', full_name='message.SelectedStates.device_dict', index=4,
+      number=5, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='update_dict', full_name='message.SelectedStates.update_dict', index=5,
+      number=6, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -130,8 +151,8 @@ _SELECTEDSTATES = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=92,
-  serialized_end=157,
+  serialized_start=93,
+  serialized_end=222,
 )
 
 
@@ -162,8 +183,8 @@ _GLOBALSTATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=159,
-  serialized_end=187,
+  serialized_start=224,
+  serialized_end=252,
 )
 
 
@@ -201,8 +222,8 @@ _REQUESTRANDOMINDICES = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=189,
-  serialized_end=253,
+  serialized_start=254,
+  serialized_end=318,
 )
 
 
@@ -233,8 +254,8 @@ _RESPONSERANDOMINDICES = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=255,
-  serialized_end=302,
+  serialized_start=320,
+  serialized_end=367,
 )
 
 DESCRIPTOR.message_types_by_name['SelectedState'] = _SELECTEDSTATE
@@ -296,8 +317,8 @@ _GRPCSERVICE = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=305,
-  serialized_end=530,
+  serialized_start=370,
+  serialized_end=595,
   methods=[
   _descriptor.MethodDescriptor(
     name='sendState',
