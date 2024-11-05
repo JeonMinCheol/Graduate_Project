@@ -20,13 +20,20 @@ message SelectedStates {
   bytes state = 1;
   string setting = 2;
   bytes weights = 3;
-  bytes cluster_dict = 4;
-  bytes device_dict = 5;
-  bytes update_dict = 6;
+  string model_name = 4;
+  string data = 5;
+  int32 n_class = 6;
 }
 
 message GlobalState {
   bytes state = 1;
+  float loss = 2;
+  float accuracy = 3;
+  float mae = 4;
+  float mse = 5;
+  float rse = 6;
+  float rmse = 7;
+  float f1_score = 8;
 }
 
 message RequestRandomIndices {

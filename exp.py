@@ -190,12 +190,12 @@ class Exp(object):
                     else:
                         states, steps = list(self.states.values()), [0 for _ in range(len(indice))]
                         
-                    global_model = pickle.loads(self.gRPCClient.sendStates(states, self.args.aggregator, steps).state)
+                    global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = self.gRPCClient.sendStates(states, self.args.aggregator, steps, self.args.model_name, self.args.data, self.args.n_class)
+                    global_model = pickle.loads(global_model)
                 
-                    loss, accuracy, avg_mae, avg_mse, avg_rse, avg_rmse, f1_score = self.valid(global_model)
                     print(f"============ Round {round} | Loss {loss} | Accuracy {accuracy} | Time {str(time.time() - s)} ============")
                     
-                    f.write(str(round)+","+str(loss)+","+str(accuracy)+","+str(avg_mae)+","+str(avg_mse)+","+str(avg_rse)+","+str(avg_rmse)+","+str(time.time() - s)+"\n")
+                    f.write(str(round)+","+str(loss)+","+str(accuracy)+","+str(mae)+","+str(mse)+","+str(rse)+","+str(rmse)+","+str(time.time() - s)+"\n")
                     
                     self.updateModel(global_model, self.parent_conns)
                     indice = None
@@ -266,14 +266,15 @@ class Exp(object):
                         max_time.pop(cluster)
                         update_dict[cluster] = 0
                         
-                    update_round = update_round + n_cluster * 6
+                    update_round = update_round + n_cluster * 100
                 
                 # 데이터 받아오기 / 나중에 클러스터 버퍼로 리팩터링하기
                 res_cluster = {}
                 updates = {}
                 flag = True
+                cur_cluster = schedule[selected_cluster_idx]
                 while True:
-                    for device in range(self.n_clients):
+                    for device in cluster_dict[cur_cluster]:
                         if self.parent_conns[device].poll(timeout=0.1): 
                             self.states[device], step_dict[device], l, _ = self.parent_conns[device].recv()  # 데이터 받기
                             device_cluster = device_dict[device]
@@ -285,7 +286,7 @@ class Exp(object):
                                 x.append(device)
                                 res_cluster[device_cluster] = x
                             
-                    if res_cluster.get(schedule[selected_cluster_idx]) is not None:
+                    if res_cluster.get(cur_cluster) is not None:
                         flag = True
                         for cluster, devices in list(res_cluster.items()):
                             if len(cluster_dict[cluster]) != len(devices):
@@ -298,15 +299,15 @@ class Exp(object):
                                 update_dict[cluster] = update_dict[cluster] + 1
                                 updates[cluster] = update_dict[cluster]
                             break
+                #global_model = self.aggregation(update_dict=updates, client_states=self.states, device_dict=device_dict, weights=step_dict, cluster_dict=cluster_dict)
+                states, steps = self.states, [0]
+                res = self.gRPCClient.sendStates(states, self.args.aggregator, steps, self.args.model_name, self.args.data, self.args.n_class)
+                global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse, res.f1_score
+                 
                 
-                        #update dict 학습에 참여한 애들만 
-                        
+                print(f"============ Round {round} | Loss {loss} | Accuracy {accuracy} | Time {str(time.time() - s)} ============")
                 
-                global_model = self.aggregation(update_dict=updates, client_states=self.states, device_dict=device_dict, weights=step_dict, cluster_dict=cluster_dict)
-                loss, accuracy, avg_mae, avg_mse, avg_rse, avg_rmse, f1_score = self.valid(global_model)
-                print(f"============ Round {round} | Loss {loss} | Accuracy {accuracy} | Selected Cluster {schedule[selected_cluster_idx]} | Time {str(time.time() - s)} ============")
-                
-                f.write(str(round)+","+str(loss)+","+str(accuracy)+","+str(avg_mae)+","+str(avg_mse)+","+str(avg_rse)+","+str(avg_rmse)+","+str(time.time() - s)+"\n")
+                f.write(str(round)+","+str(loss)+","+str(accuracy)+","+str(mae)+","+str(mse)+","+str(rse)+","+str(rmse)+","+str(time.time() - s)+"\n")
                 
                 if selected_cluster_idx == n_cluster - 1:
                     self.updateModel(global_model, self.parent_conns, list(i for i in range(self.n_clients)))
@@ -323,10 +324,10 @@ class Exp(object):
                 
                 # drop states
                 devices = []
-                for i in range(selected_cluster_idx+1):
-                    devices.extend(list(cluster_dict[schedule[i]]))
-                selected_cluster_idx = (selected_cluster_idx + 1) % n_cluster
+                devices.extend(list(cluster_dict[cur_cluster]))
                 self.drop_states(devices)
+                
+                selected_cluster_idx = (selected_cluster_idx + 1) % n_cluster
                 step_dict.clear()
                 self.states.clear()
                 round += 1
@@ -352,10 +353,10 @@ class Exp(object):
         print(devices)
         print("=============== drop states ===================")
 
-    def aggregation(self, update_dict, client_states, device_dict, weights, cluster_dict):
+    def aggregation(self, update_dict, client_states, device_dict, weights, cluster_dict, cur_cluster):
         cluster_steps = {} # cluster: total_steps
-        rebalanced_update_dict = {} # 업데이트 순서 반전
-        total_update = sum(list(update_dict.values()))
+        # rebalanced_update_dict = {} # 업데이트 순서 반전
+        # total_update = sum(list(update_dict.values()))
         
         # 모델 생성
         model_state = copy.deepcopy(list(client_states.values())[0])
@@ -363,8 +364,8 @@ class Exp(object):
         for key in keys:
             model_state[key] = torch.zeros_like(model_state[key].cpu().float()) 
             
+        '''
         # cluster_update_cnt 초기화
-        
         visited = [False for _ in range(max(list(update_dict.keys())) + 1)]
         while len(list(rebalanced_update_dict.keys())) < len(list(update_dict.keys())):
             max_update = -1
@@ -383,72 +384,30 @@ class Exp(object):
                     
             rebalanced_update_dict[max_cluster] = min_update
             visited[min_cluster] = True
+        '''
         
+        '''
         # cluster_steps 초기화
         for device, cluster in list(device_dict.items()):
             if cluster_steps.get(cluster) is None:
                 cluster_steps[cluster] = 0
             
-            cluster_steps[cluster] = cluster_steps[cluster] + weights[device]
+            try:
+                cluster_steps[cluster] = cluster_steps[cluster] + weights[device]
+            except Exception as e:
+                print(e)
+                print(weights)
+                print(device)
+        '''
         
         # Aggregation 진행 (가중치 = device_step * update / (cluster_steps[cluster] * total_update))
-        for cluster, devices in list(cluster_dict.items()):
+        for devices in list(cluster_dict[cur_cluster]):
             for device in list(devices):
                 device_step = weights[device]
-                update = rebalanced_update_dict[cluster]
-                factor = device_step * update / (cluster_steps[cluster] * total_update)
+                # update = rebalanced_update_dict[cluster]
+                factor = device_step / (cluster_steps[cur_cluster])
             
                 for key in keys:
                     model_state[key] += client_states[device][key].cpu().float() * factor
                     
         return model_state
-    
-    def valid(self, val_model):
-        if self.args.data == "EMNIST":
-            model = CNN(1, self.n_class) if self.args.model_name == "cnn" else mobilenet(1, 1, self.n_class)
-        elif self.args.data == "cifar10" or "cifar100":
-            model = CNN(3, self.n_class) if self.args.model_name == "cnn" else mobilenet(1, 3, self.n_class)
-        
-        model.to(self.device)
-        model.load_state_dict(val_model)
-        f1_metric = MulticlassF1Score(num_classes=self.n_class, average='macro').to(self.device)
-        
-        with torch.no_grad():  # 그라디언트 계산 비활성화
-            model.eval()
-            criterion = nn.CrossEntropyLoss()
-            correct = 0
-            total = 0
-            total_loss = 0.0
-            mae, mse, rse, rmse = 0, 0, 0, 0
-            
-            for data, target in self.test_loader:
-                data, target = data.to(self.device), target.to(self.device)
-                
-                # 모델 출력 예측
-                output = model(data)
-                loss = criterion(output, target)
-                
-                a, b, c, d = metric(torch.argmax(output, dim=-1).cpu(), target.cpu())
-                mae += a; mse += b; rse += c; rmse += d
-
-                # 손실 집계
-                total_loss += loss.item() * data.size(0)  # 배치 크기로 가중합
-                
-                # 예측값을 통한 정확도 계산
-                _, predicted = torch.max(output, 1)
-                total += target.size(0)
-                correct += (predicted == target).sum().item()
-                
-                # F1 Score 누적
-                f1_metric.update(predicted, target) 
-        
-        # 평균 손실 및 정확도 계산
-        avg_loss = total_loss / total
-        accuracy = correct / total
-        avg_mae = mae / total        
-        avg_mse = mse / total        
-        avg_rse = rse / total        
-        avg_rmse = rmse / total     
-        f1_score = f1_metric.compute()
-
-        return avg_loss, accuracy, avg_mae, avg_mse, avg_rse, avg_rmse, f1_score
