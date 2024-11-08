@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import math
 import utils.utils as util
+from collections import OrderedDict
 
 # 합칠 때 클러스터의 data distribution도 고려할 것
 def make_clusters(clusters, states, steps, min_cluster):
@@ -100,8 +101,13 @@ def calc_scores(devices, states):
 # 두 모델의 파라미터 리스트 or 레이블 벡터를 입력으로 받습니다.
 def calculate_similarity_and_distance(params1, params2):
     # 파라미터 텐서를 직렬화하여 하나의 벡터로 만듭니다.
-    tensors1 = torch.tensor(params1, dtype=torch.float32)
-    tensors2 = torch.tensor(params2, dtype=torch.float32)
+    if isinstance(params1, OrderedDict):
+        tensors1 = list(params1.values())  # OrderedDict에서 텐서 값 추출
+        tensors2 = list(params2.values())
+    else:
+        tensors1 = torch.tensor(params1, dtype=torch.float32)
+        tensors2 = torch.tensor(params2, dtype=torch.float32)
+    
 
     # Flattening
     tensors1 = torch.cat([p.view(-1) for p in tensors1]).cpu()

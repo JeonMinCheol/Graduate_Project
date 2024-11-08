@@ -4,12 +4,15 @@ package message;
 
 service grpcService{
  rpc sendState(SelectedStates) returns (GlobalState) {}
- rpc sendSingleState(SelectedState) returns (EmptyResponse) {}
+ rpc valSetup(clientInformation) returns (EmptyResponse) {}
  rpc randomSample(RequestRandomIndices) returns (ResponseRandomIndices) {}
+ rpc getGlobalModel(EmptyResponse) returns (GlobalState) {}
 }
 
-message SelectedState {
-  bytes state = 1;
+message clientInformation {
+  string data = 1; 
+  int32 n_class = 2;
+  string model_name = 3;
 }
 
 message EmptyResponse {
@@ -20,9 +23,6 @@ message SelectedStates {
   bytes state = 1;
   string setting = 2;
   bytes weights = 3;
-  string model_name = 4;
-  string data = 5;
-  int32 n_class = 6;
 }
 
 message GlobalState {

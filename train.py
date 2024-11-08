@@ -7,6 +7,7 @@ import copy
 
 def train_local_client_prox(clients, data_loader, epochs, client_id, conn, mu, event):
     train_delay, transfer_delay, batch_size, model, optimizer, loss_fn, host, idx, rounds, device_id = clients[client_id]
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
     device = f"cuda:{device_id}" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
     model.train()
@@ -21,12 +22,15 @@ def train_local_client_prox(clients, data_loader, epochs, client_id, conn, mu, e
             model_updated = False
             running_loss = 0.0
             
-            if conn.poll(timeout=0.01): 
-                global_model = conn.recv()
-                model.load_state_dict(global_model)
-                global_model = model
-                model_updated = True
-                train_round = 0
+            while conn.poll(): 
+                state, selected = conn.recv()
+                global_model.load_state_dict(state)
+                if selected:
+                    model.load_state_dict(state)
+                    model_updated = True
+                    train_round, tau = 0, 0
+                
+            if model_updated:
                 break
             
             for images, labels in data_loader:
@@ -44,6 +48,7 @@ def train_local_client_prox(clients, data_loader, epochs, client_id, conn, mu, e
                 loss = loss + prox_term
                 loss.backward()
                 optimizer.step()
+                scheduler.step(loss)  # 설정된 step_size 간격으로 학습률 감소
                 running_loss += loss.item()
                 
             time.sleep(train_delay) # 학습 딜레이
@@ -55,6 +60,7 @@ def train_local_client_prox(clients, data_loader, epochs, client_id, conn, mu, e
 
 def train_local_client_nova(clients, data_loader, epochs, client_id, conn, event):
     train_delay, transfer_delay, batch_size, model, optimizer, loss_fn, host, idx, rounds, device_id = clients[client_id]
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
     device = f"cuda:{device_id}" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
     model.train()
@@ -69,11 +75,14 @@ def train_local_client_nova(clients, data_loader, epochs, client_id, conn, event
             model_updated = False
             running_loss = 0.0
             
-            if conn.poll(timeout=0.01): 
-                state = conn.recv()
-                model.load_state_dict(state)
-                model_updated = True
-                train_round, tau = 0, 0
+            while conn.poll(): 
+                state, selected = conn.recv()
+                if selected:
+                    model.load_state_dict(state)
+                    model_updated = True
+                    train_round, tau = 0, 0
+                
+            if model_updated:
                 break
                 
             for images, labels in data_loader:
@@ -83,6 +92,7 @@ def train_local_client_nova(clients, data_loader, epochs, client_id, conn, event
                 loss = loss_fn(pred,labels)
                 loss.backward()
                 optimizer.step()
+                scheduler.step(loss)  # 설정된 step_size 간격으로 학습률 감소
                 running_loss += loss.item()
                 tau += 1
                 
@@ -97,6 +107,7 @@ def train_local_client_nova(clients, data_loader, epochs, client_id, conn, event
             
 def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_class, mu, event):
     train_delay, transfer_delay, batch_size, model, optimizer, loss_fn, host, idx, rounds, device_id = clients[client_id]
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
     device = f"cuda:{device_id}" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
     model.train()
@@ -114,15 +125,16 @@ def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_
         for epoch in range(epochs):
             model_updated = False
             running_loss = 0.0
-        
-            if conn.poll(timeout=0.01): 
+            while conn.poll(): 
                 state, selected = conn.recv()
                 global_model.load_state_dict(state)
                 if selected:
                     model.load_state_dict(state)
                     model_updated = True
                     train_round, tau = 0, 0
-                    break
+                
+            if model_updated:
+                break
             
             for images, labels in data_loader:
                 
@@ -143,6 +155,7 @@ def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_
                 loss = loss + (mu / 2) * prox_term
                 loss.backward()
                 optimizer.step()
+                # scheduler.step(loss)  # 설정된 step_size 간격으로 학습률 감소
                 running_loss += loss.item()
                 tau += 1
                 

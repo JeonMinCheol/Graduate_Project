@@ -19,15 +19,20 @@ class grpcServiceStub(object):
                 request_serializer=message__pb2.SelectedStates.SerializeToString,
                 response_deserializer=message__pb2.GlobalState.FromString,
                 )
-        self.sendSingleState = channel.unary_unary(
-                '/message.grpcService/sendSingleState',
-                request_serializer=message__pb2.SelectedState.SerializeToString,
+        self.valSetup = channel.unary_unary(
+                '/message.grpcService/valSetup',
+                request_serializer=message__pb2.clientInformation.SerializeToString,
                 response_deserializer=message__pb2.EmptyResponse.FromString,
                 )
         self.randomSample = channel.unary_unary(
                 '/message.grpcService/randomSample',
                 request_serializer=message__pb2.RequestRandomIndices.SerializeToString,
                 response_deserializer=message__pb2.ResponseRandomIndices.FromString,
+                )
+        self.getGlobalModel = channel.unary_unary(
+                '/message.grpcService/getGlobalModel',
+                request_serializer=message__pb2.EmptyResponse.SerializeToString,
+                response_deserializer=message__pb2.GlobalState.FromString,
                 )
 
 
@@ -40,13 +45,19 @@ class grpcServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def sendSingleState(self, request, context):
+    def valSetup(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def randomSample(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def getGlobalModel(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -60,15 +71,20 @@ def add_grpcServiceServicer_to_server(servicer, server):
                     request_deserializer=message__pb2.SelectedStates.FromString,
                     response_serializer=message__pb2.GlobalState.SerializeToString,
             ),
-            'sendSingleState': grpc.unary_unary_rpc_method_handler(
-                    servicer.sendSingleState,
-                    request_deserializer=message__pb2.SelectedState.FromString,
+            'valSetup': grpc.unary_unary_rpc_method_handler(
+                    servicer.valSetup,
+                    request_deserializer=message__pb2.clientInformation.FromString,
                     response_serializer=message__pb2.EmptyResponse.SerializeToString,
             ),
             'randomSample': grpc.unary_unary_rpc_method_handler(
                     servicer.randomSample,
                     request_deserializer=message__pb2.RequestRandomIndices.FromString,
                     response_serializer=message__pb2.ResponseRandomIndices.SerializeToString,
+            ),
+            'getGlobalModel': grpc.unary_unary_rpc_method_handler(
+                    servicer.getGlobalModel,
+                    request_deserializer=message__pb2.EmptyResponse.FromString,
+                    response_serializer=message__pb2.GlobalState.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -98,7 +114,7 @@ class grpcService(object):
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def sendSingleState(request,
+    def valSetup(request,
             target,
             options=(),
             channel_credentials=None,
@@ -108,8 +124,8 @@ class grpcService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/message.grpcService/sendSingleState',
-            message__pb2.SelectedState.SerializeToString,
+        return grpc.experimental.unary_unary(request, target, '/message.grpcService/valSetup',
+            message__pb2.clientInformation.SerializeToString,
             message__pb2.EmptyResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
@@ -128,5 +144,22 @@ class grpcService(object):
         return grpc.experimental.unary_unary(request, target, '/message.grpcService/randomSample',
             message__pb2.RequestRandomIndices.SerializeToString,
             message__pb2.ResponseRandomIndices.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def getGlobalModel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/message.grpcService/getGlobalModel',
+            message__pb2.EmptyResponse.SerializeToString,
+            message__pb2.GlobalState.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

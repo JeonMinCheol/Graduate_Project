@@ -39,10 +39,10 @@ def arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n_class", type=int, default=26)
     parser.add_argument("--frac", type=float, default=0.1)
     parser.add_argument("--target_accuracy", type=float, default=0.995)
-    parser.add_argument("--min_clusters", type=int, default=1)
+    parser.add_argument("--max_cluster", type=int, default=3)
 
     parser.add_argument("--rounds", type=int, default=3)
-    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--eta", type=float, default=0)
     parser.add_argument("--clients_per_rounds", type=int, default=5)
     parser.add_argument("--n_client_epochs", type=int, default=5)
@@ -50,8 +50,12 @@ def arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=0.005)
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--early_stopping", type=int, default=1)
+    parser.add_argument("--update_counter", type=int, default=1)
     parser.add_argument("--non_iid", type=int, default=0)
     parser.add_argument("--batch_size", type=int, default=512)
+    
+    # Cluster
+    parser.add_argument("--n_cluster", type=int, default=2)
 
     # FedProx
     parser.add_argument('--mu', type=float, default=0.3, help='proximal term constant')
@@ -214,6 +218,32 @@ class EarlyStopping:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
         torch.save(model, path + '/' + 'checkpoint.pth')
         self.val_loss_min = val_loss
+
+class UpdateCounter:
+    def __init__(self, patience=7, verbose=False, delta=0):
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.update = False
+        self.val_loss_min = np.Inf
+        self.delta = delta
+
+    def __call__(self, val_loss, model, path):
+        score = -val_loss
+        if self.best_score is None:
+            self.best_score = score
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            print(f'Cluster update counter: {self.counter} out of {self.patience}')
+            if self.counter >= self.patience:
+                self.update = True
+        else:
+            self.best_score = score
+            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).')
+            self.val_loss_min = val_loss
+            self.counter = 0
+
 
 # 안 씀
 def loadDataset(path):

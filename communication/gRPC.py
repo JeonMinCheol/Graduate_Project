@@ -14,6 +14,8 @@ from torchmetrics.classification import MulticlassF1Score
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
+# grpc 오류 시 프로세스 종료 후 재실행
+
 class gRPCClient(object):
     def __init__(self, host, server_port, MAX_MESSAGE_LENGTH  = 2000 * 1024 * 1024):
         self.host = host
@@ -30,32 +32,27 @@ class gRPCClient(object):
         # 스텁 생성
         self.stub = pb2_grpc.grpcServiceStub(self.channel)
 
-    # ================ Request ======================
-    # selection=wait 설정에서 디바이스 선택을 위해 사용
     def randomSample(self, num_clients, num_samples):
         request = pb2.RequestRandomIndices(num_clients=num_clients, num_samples=num_samples)
         return self.stub.randomSample(request)
     
-    # selection=wait 설정에서 파라미터 전송을 위해 사용
-    def sendStates(self, states, setting, weights, model_name, data, n_class):
+    def sendStates(self, states, setting, weights):
         try:
             serialized_states = pickle.dumps(states)
             serialized_weights = pickle.dumps(weights)
-            request = pb2.SelectedStates(state=serialized_states, setting=setting, weights=serialized_weights, model_name=model_name, data=data, n_class=n_class)
+            request = pb2.SelectedStates(state=serialized_states, setting=setting, weights=serialized_weights)
             return self.stub.sendState(request)
         except Exception as e:
             print(traceback.format_exc())
     
-    # selection=score 설정에서 파라미터 전송을 위해 사용
-    def sendSingleState(self, state):
-        if not isinstance(state, bytes):
-            raise TypeError("Expected states to be bytes, got {}".format(type(state))
-                            )
-        request = pb2.SelectedState(state=state)
-        return self.stub.sendSingleState(request)
-    # ================================================
+    def setup(self, data, n_class, model_name):
+        request = pb2.clientInformation(data=data, n_class=n_class, model_name=model_name)
+        return self.stub.valSetup(request)
     
-# Response service
+    def getGlobalModel(self):
+        request = pb2.EmptyResponse(message="get global state")
+        return self.stub.getGlobalModel(request)
+    
 class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
     def __init__(self):
         super(grpcServiceServicer, self).__init__()
@@ -68,6 +65,34 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
             transforms.ToTensor(),  # 이미지를 PyTorch Tensor로 변환 (0~255 값을 0~1로 스케일링)
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))  # 평균과 표준편차로 정규화
         ])
+    
+    def valSetup(self, request, context):
+        data, n_class, model_name = request.data, request.n_class, request.model_name
+        try:
+            if self.test_loader is None and self.model is None:
+                if data == "cifar10":
+                    test_dataset = datasets.CIFAR10(root='../datasets/cifar10/', train=False, download=True, transform=self.transform)
+                    self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
+                    self.model = CNN(3, n_class) if model_name == "cnn" else MobileNet(1, 3, n_class)
+                elif data == "cifar100":
+                    test_dataset = datasets.CIFAR100(root='../datasets/cifar100/', train=False, download=True, transform=self.transform)
+                    self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
+                    self.model = CNN(3, n_class) if model_name == "cnn" else MobileNet(1, 3, n_class)
+                elif data == "EMNIST":
+                    self.train_dataset = datasets.EMNIST(root='../datasets/EMNIST/', split = 'byclass', train=True, download=True,  transform=transforms.ToTensor())
+                    test_dataset = datasets.EMNIST(root='../datasets/EMNIST/', split = 'byclass', train=False, download=True, transform=transforms.ToTensor())
+                    self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
+                    self.model = CNN(1, n_class) if model_name == "cnn" else MobileNet(1, 1, n_class)
+            
+                self.f1_metric = MulticlassF1Score(num_classes=n_class, average='macro').to(self.device)
+                
+        except Exception as e:
+            print(e)
+            context.set_details('Failed to deserialize states')
+            context.set_code(grpc.StatusCode.INTERNAL)
+            return pb2.EmptyResponse(message="Error")
+            
+        return pb2.EmptyResponse(message="success")
         
     def randomSample(self, request, context):
         # 기존과 동일한 randomSample 구현
@@ -83,24 +108,7 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
         print(sampled_indices)
         return pb2.ResponseRandomIndices(device_indices=sampled_indices)
 
-    def valid(self, val_model, model_name, data, n_class):
-        if self.test_loader is None and self.model is None:
-            if data == "cifar10":
-                test_dataset = datasets.CIFAR10(root='../datasets/cifar10/', train=False, download=True, transform=self.transform)
-                self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
-                self.model = CNN(3, n_class) if model_name == "cnn" else MobileNet(1, 3, n_class)
-            elif data == "cifar100":
-                test_dataset = datasets.CIFAR100(root='../datasets/cifar100/', train=False, download=True, transform=self.transform)
-                self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
-                self.model = CNN(3, n_class) if model_name == "cnn" else MobileNet(1, 3, n_class)
-            elif data == "EMNIST":
-                self.train_dataset = datasets.EMNIST(root='../datasets/EMNIST/', split = 'byclass', train=True, download=True,  transform=transforms.ToTensor())
-                test_dataset = datasets.EMNIST(root='../datasets/EMNIST/', split = 'byclass', train=False, download=True, transform=transforms.ToTensor())
-                self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
-                self.model = CNN(1, n_class) if model_name == "cnn" else MobileNet(1, 1, n_class)
-        
-            self.f1_metric = MulticlassF1Score(num_classes=n_class, average='macro').to(self.device)
-            
+    def valid(self, val_model):    
         self.model.to(self.device)
         self.model.load_state_dict(val_model)
         
@@ -146,45 +154,81 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
     
     def sendState(self, request, context):
         try:
+            # 변수 초기화
             client_states = pickle.loads(request.state)
             weights = pickle.loads(request.weights)
             setting = request.setting
             
-            model_state = copy.deepcopy(list(client_states.values())[0])
+            # 모델 템플릿 생성
+            model_state = copy.deepcopy(list(client_states)[0]) if setting != "cluster" else copy.deepcopy(list(client_states.values())[0])
             keys = model_state.keys()
+            
+            # 집계
             for key in keys:
                 model_state[key] = torch.zeros_like(model_state[key].cpu().float()) 
                 for idx in range(len(client_states)):
-                    if setting == "fednova":
-                        factor = weights[idx] / sum(weights)
-                    else:
-                        factor = 1 / len(list(client_states.keys()))
+                    # if setting == "cluster":
+                    #     factor = weights[list(client_states.keys())[idx]] / sum(list(weights.values())) # FedNova 적용
+                    if setting == "cluster":
+                        factor = 1 / len(list(client_states.keys())) # 미적용
+                    elif setting == "fednova": 
+                        factor = weights[idx] / sum(weights) 
+                    else: 
+                        factor = 1 / len(list(client_states))
+                        
                     model_state[key] += list(client_states.values())[idx][key].cpu().float() * factor
-            print("모델 생성")
             
             # 성능 평가
-            val = self.valid(data=request.data, model_name=request.model_name,n_class=request.n_class,val_model=model_state)
-            print("성능 평가")
+            val = self.valid(model_state) 
             
-            if self.global_state is not None and val is not None:
-                a = 0.7
-                if self.val["loss"] < val["loss"]:
-                    for key in keys:
-                        model_state[key] = a * self.global_state[key] + (1 - a) * model_state[key]
+            if setting == "cluster":
+                if self.global_state is not None and val is not None:
+                    best_state = model_state
+                    best_loss = val["loss"]
+                    alpha = -1
+                    
+                    if self.val["loss"] < val["loss"]:
+                        for a in [0.6, 0.7, 0.8, 0.9]: # a = 0.6 ~ 0.9 이 중 가장 좋은 값으로 선택
+                            state = copy.deepcopy(model_state)
+                                
+                            for key in keys:
+                                state[key] = a * self.global_state[key] + (1 - a) * model_state[key]
                         
-                val = self.valid(data=request.data, model_name=request.model_name,n_class=request.n_class,val_model=model_state)
+                            v = self.valid(state)
+                            
+                            if v["loss"] < best_loss:
+                                best_loss = v["loss"]
+                                best_state = state
+                                alpha, val = a, v
+                                
+                        model_state = best_state 
+                            
+                        if self.val["loss"] >= val["loss"]: # 안 없애는게 좋다.
+                            self.global_state = model_state
+                            self.val = val
+                        
+                    else:
+                        self.global_state = model_state
+                        self.val = val
+                    
+                else:
+                        self.global_state = model_state
+                        self.val = val
+            else:
+                self.global_state = model_state
+                self.val = val
                 
-            self.global_state = model_state
-            self.val = val
-            print("글로벌 모델 생성")
         except Exception as e:
-            print(traceback.format_exc())
+            print(e)
             context.set_details('Failed to deserialize states')
             context.set_code(grpc.StatusCode.INTERNAL)
             return pb2.GlobalState(state=b"Error")
         
-        new_global_state = pickle.dumps(self.global_state)
-        return pb2.GlobalState(state=new_global_state,loss=val["loss"],accuracy=val["accuracy"],mae=val["mae"],mse=val["mse"],rse=val["rse"],rmse=val["rmse"],f1_score=val["f1_score"])
+        return pb2.GlobalState(state=pickle.dumps(self.global_state),loss=val["loss"],accuracy=val["accuracy"],mae=val["mae"],mse=val["mse"],rse=val["rse"],rmse=val["rmse"],f1_score=val["f1_score"])
+    
+    def getGlobalModel(self, request, context):
+        val = self.val
+        return pb2.GlobalState(state=pickle.dumps(self.global_state),loss=val["loss"],accuracy=val["accuracy"],mae=val["mae"],mse=val["mse"],rse=val["rse"],rmse=val["rmse"],f1_score=val["f1_score"])
         
 # gRPC server
 def serve(MAX_MESSAGE_LENGTH, PORT):
