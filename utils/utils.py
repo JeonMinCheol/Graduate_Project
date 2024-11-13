@@ -39,7 +39,7 @@ def arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n_class", type=int, default=26)
     parser.add_argument("--frac", type=float, default=0.1)
     parser.add_argument("--target_accuracy", type=float, default=0.995)
-    parser.add_argument("--max_cluster", type=int, default=3)
+    parser.add_argument("--max_cluster", type=int, default=4)
 
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--patience", type=int, default=100)
@@ -244,34 +244,3 @@ class UpdateCounter:
             self.val_loss_min = val_loss
             self.counter = 0
 
-
-# 안 씀
-def loadDataset(path):
-    dataset = torch.load(path)
-    
-    if isinstance(dataset, (tuple, list)):
-        # 예시: (data, targets)로 저장된 경우
-        data, targets = dataset
-        dataset = torch.utils.data.TensorDataset(data, targets)
-        print(f"Dataset Length: {len(dataset)}")
-    return dataset
-
-def sample(path, n_clients):
-    data = loadDataset(path)
-    
-    Dataset = list(data)
-    indice = list(range(len(data)))
-    samples = list()
-    num_data = len(Dataset) / (n_clients * 10)
-    
-    for _ in range(n_clients):
-        x = []
-        k = int(num_data * random.randrange(5, 11))
-        random_indice = random.sample(indice, k)
-        
-        for index in random_indice:
-            x.append(Dataset[index])
-            indice.remove(index)
-        
-        samples.append(x)
-    return samples

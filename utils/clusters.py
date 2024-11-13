@@ -108,7 +108,6 @@ def calculate_similarity_and_distance(params1, params2):
         tensors1 = torch.tensor(params1, dtype=torch.float32)
         tensors2 = torch.tensor(params2, dtype=torch.float32)
     
-
     # Flattening
     tensors1 = torch.cat([p.view(-1) for p in tensors1]).cpu()
     tensors2 = torch.cat([p.view(-1) for p in tensors2]).cpu()

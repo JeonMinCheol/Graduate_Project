@@ -23,6 +23,7 @@ message SelectedStates {
   bytes state = 1;
   string setting = 2;
   bytes weights = 3;
+  int32 drop = 4;
 }
 
 message GlobalState {

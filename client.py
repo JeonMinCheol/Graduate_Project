@@ -27,10 +27,10 @@ class Client:
         # 지연시간, 통신시간, 배치크기
         for i in range(self.n_clients):
             if self.args.is_testing:
-                setting.append([0, random.random(), self.args.batch_size])
+                setting.append([i * 0.002, i * 0.05, self.args.batch_size])
                 continue
             
-            setting.append([0.5 * i if i > self.n_clients / 2 else (i + 1) / 4, random.random(), self.args.batch_size])
+            setting.append([0.2 * i, i * 0.05, self.args.batch_size])
         return setting
             
     def _printClients(self):

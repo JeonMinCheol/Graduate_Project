@@ -36,11 +36,11 @@ class gRPCClient(object):
         request = pb2.RequestRandomIndices(num_clients=num_clients, num_samples=num_samples)
         return self.stub.randomSample(request)
     
-    def sendStates(self, states, setting, weights):
+    def sendStates(self, states, setting, weights, drop):
         try:
             serialized_states = pickle.dumps(states)
             serialized_weights = pickle.dumps(weights)
-            request = pb2.SelectedStates(state=serialized_states, setting=setting, weights=serialized_weights)
+            request = pb2.SelectedStates(state=serialized_states, setting=setting, weights=serialized_weights, drop=drop)
             return self.stub.sendState(request)
         except Exception as e:
             print(traceback.format_exc())
@@ -60,7 +60,7 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
         self.test_loader = None
         self.model = None
         self.val = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.transform = transforms.Compose([
             transforms.ToTensor(),  # 이미지를 PyTorch Tensor로 변환 (0~255 값을 0~1로 스케일링)
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))  # 평균과 표준편차로 정규화
@@ -158,25 +158,38 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
             client_states = pickle.loads(request.state)
             weights = pickle.loads(request.weights)
             setting = request.setting
+            drop = request.drop
             
             # 모델 템플릿 생성
-            model_state = copy.deepcopy(list(client_states)[0]) if setting != "cluster" else copy.deepcopy(list(client_states.values())[0])
+            model_state = copy.deepcopy(list(client_states.values())[0])
             keys = model_state.keys()
+            
+            weight_dict = {}
+            if setting == "cluster" and drop:
+                Beta = 0.1
+                drop_size = max(1, int(Beta * len(list(client_states.values()))))
+                for device in list(client_states.keys()):
+                    val = self.valid(model_state)
+                    weight_dict[device] = val["f1_score"]
+                
+                # 성능이 낮은 일부 디바이스 제거 (기준: Beta) 
+                d = sorted(weight_dict.items(), key=lambda x: x[1])
+                for _ in range(drop_size):
+                    device = d.pop(0)[0]
+                    client_states.pop(device)
+                    print(f"Drop device {device} | f1_score: {weight_dict[device]}")
             
             # 집계
             for key in keys:
-                model_state[key] = torch.zeros_like(model_state[key].cpu().float()) 
+                model_state[key] = torch.zeros_like(model_state[key].to(self.device).float()) 
                 for idx in range(len(client_states)):
-                    # if setting == "cluster":
-                    #     factor = weights[list(client_states.keys())[idx]] / sum(list(weights.values())) # FedNova 적용
-                    if setting == "cluster":
-                        factor = 1 / len(list(client_states.keys())) # 미적용
-                    elif setting == "fednova": 
-                        factor = weights[idx] / sum(weights) 
+                    if setting == "fednova": 
+                        device = list(client_states.keys())[idx]
+                        factor = weights[device] / sum(list(weights.values())) 
                     else: 
-                        factor = 1 / len(list(client_states))
-                        
-                    model_state[key] += list(client_states.values())[idx][key].cpu().float() * factor
+                        factor = 1 / len(list(client_states.keys()))
+                    
+                    model_state[key] += list(client_states.values())[idx][key].to(self.device).float() * factor
             
             # 성능 평가
             val = self.valid(model_state) 
@@ -185,10 +198,8 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
                 if self.global_state is not None and val is not None:
                     best_state = model_state
                     best_loss = val["loss"]
-                    alpha = -1
-                    
                     if self.val["loss"] < val["loss"]:
-                        for a in [0.6, 0.7, 0.8, 0.9]: # a = 0.6 ~ 0.9 이 중 가장 좋은 값으로 선택
+                        for a in [0.6, 0.7, 0.8, 0.9]: # a = 0.7 ~ 0.9 이 중 가장 좋은 값으로 선택
                             state = copy.deepcopy(model_state)
                                 
                             for key in keys:
@@ -199,11 +210,10 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
                             if v["loss"] < best_loss:
                                 best_loss = v["loss"]
                                 best_state = state
-                                alpha, val = a, v
+                                val = v
                                 
                         model_state = best_state 
-                            
-                        if self.val["loss"] >= val["loss"]: # 안 없애는게 좋다.
+                        if self.val["loss"] >= val["loss"]: 
                             self.global_state = model_state
                             self.val = val
                         
@@ -219,7 +229,7 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
                 self.val = val
                 
         except Exception as e:
-            print(e)
+            print(traceback.format_exc())
             context.set_details('Failed to deserialize states')
             context.set_code(grpc.StatusCode.INTERNAL)
             return pb2.GlobalState(state=b"Error")

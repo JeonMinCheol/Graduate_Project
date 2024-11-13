@@ -86,7 +86,7 @@ class Exp(object):
             parent_conn, child_conn = mp.Pipe()
             start =mp.Event()
             if self.args.aggregator == "cluster":
-                p = mp.Process(target=train_local_client_cluster, args=(clients, self.device_dataloaders[idx], self.clients_per_rounds * self.epoch, idx, child_conn, self.n_class, self.mu, start))
+                p = mp.Process(target=train_local_client_cluster, args=(clients, self.device_dataloaders[idx], self.clients_per_rounds * self.epoch, idx, child_conn, self.n_class, start))
             elif self.args.aggregator == "fedavg":
                 p = mp.Process(target=train_local_client_prox, args=(clients, self.device_dataloaders[idx], self.clients_per_rounds * self.epoch, idx, child_conn, 0, start))
             elif self.args.aggregator == "fedprox":
@@ -103,8 +103,9 @@ class Exp(object):
             p.start()
             
         for i, p in enumerate(self.start_events):
-            print(f"Client {i} training start!")
             p.set()
+            
+        print(f"Training start!")
             
     def updateModel(self, model, conns, devices):
         if devices is None:
@@ -163,34 +164,27 @@ class Exp(object):
                     self.states.clear()
                     step_dict.clear()
                 
-                if round > 1:
-                    self.drop_states()
-                
-                for device in indice:
-                    while self.parent_conns[device].poll(): 
-                        res = self.parent_conns[device].recv()  # 데이터 받기
-                        if self.args.aggregator == "fednova":
-                            self.states[device], tau, _ = res
-                            step_dict[device] = tau
-                        else: 
-                            self.states[device], _ = res
+                self.drop_states(range(self.n_clients))
+                while len(self.states.keys()) < len(indice):
+                    for device in indice:
+                        while self.parent_conns[device].poll(): 
+                            res = self.parent_conns[device].recv()  # 데이터 받기
+                            if self.args.aggregator == "fednova":
+                                self.states[device], tau, _ = res
+                                step_dict[device] = tau
+                            else: 
+                                self.states[device], _ = res
                     
                 if len(self.states.keys()) >= len(indice):
-                    states = []
-                    steps = []
-                    if self.args.aggregator == "fednova":
-                        states, steps = list(self.states.values()), list(step_dict.values())
-                    else:
-                        states, steps = list(self.states.values()), [0 for _ in range(len(indice))]
-                        
-                    res = self.gRPCClient.sendStates(states, self.args.aggregator, steps)
+                    res = self.gRPCClient.sendStates(self.states, self.args.aggregator, step_dict, False)
                     global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse, res.f1_score
                 
                     print(f"============ Round {round} | Loss {loss} | Accuracy {accuracy} | Time {str(time.time() - s)} ============")
                     
                     f.write(str(round)+","+str(loss)+","+str(accuracy)+","+str(mae)+","+str(mse)+","+str(rse)+","+str(rmse)+","+str(time.time() - s)+"\n")
                     
-                    self.updateModel(global_model, self.parent_conns)
+                    self.updateModel(global_model, self.parent_conns, range(self.n_clients))
+                    
                     indice = None
                     self.states.clear()
                     step_dict.clear()
@@ -207,15 +201,17 @@ class Exp(object):
         else:
             # TODO : 한 바퀴 순환하면 클러스터 분배 다시 
             update_counter = UpdateCounter(patience= self.args.n_cluster / 2 + 1, verbose=True)
-            round, n_cluster, update_round, selected_cluster_idx, cnt, self.patience = 1, self.args.n_cluster - 1, 1, 0, 0, int(self.args.max_cluster + 1.5)
+            round, n_cluster, update_round, selected_cluster_idx, self.patience = 1, self.args.n_cluster - 1, 1, 0, int(self.args.max_cluster + 1.5)
             cluster_dict = {} # cluster: list(devices)
             device_dict = {} # device: cluster
             labels_dict = {} # device: labels
             times_dict = {} # device: time
             update_dict = {} # cluster: update 
             pass_list = [] # 여기에 있는 클러스터는 업데이트 한 번 건너 뜀
-            best_score = 100
+            re_cluster = 0
+            drop = False
             
+            best_score = 100
             while round <= self.args.rounds:
                 
                 # device 학습 시간 / label 분포 측정
@@ -225,40 +221,59 @@ class Exp(object):
                     while len(times_dict.keys()) < self.n_clients:
                         for device in range(self.n_clients):
                             while self.parent_conns[device].poll():
-                                _, _, _, labels_dict[device] = self.parent_conns[device].recv()
+                                _, _, labels_dict[device] = self.parent_conns[device].recv()
                                 times_dict[device] = time.time() - start_time
                                 visited[device] = True
                     
                     similarity_scores = calc_scores(range(self.n_clients), labels_dict)
                     linked = linkage(squareform(similarity_scores), method='average')
                     
-                # cluster : 2 ~ n / 아웃라이어 쳐내기 or 가중치 줄이기 and 클러스터 내부 디바이스 평가해서 가중치 주기
+                # cluster : 2 ~ n / f1_score랑  loss값 평가해서 클러스터 내 일부 디바이스만 사용하기
                 if round == update_round or update_counter.update:
-                    if update_counter.update and n_cluster >= self.args.max_cluster: 
-                        n_cluster = 1
-                        cnt = cnt + 1
-                    
-                    if cnt > 1 and cnt % 2 == 0:
-                        # 과적합 여부 판단 / 이때부턴 비슷한 state들끼리 클러스터링
-                        # 학습 3번해서 해당 state들로 스코어 계산
-                        print("클러스터 과적합, 재 클러스터")
+                    if update_counter.update and n_cluster >= self.args.max_cluster:
+                        print("재 클러스터")
+                        # drop = True
+                        
+                        # 최적 모델 뿌려줌
                         self.updateModel(pickle.loads(self.gRPCClient.getGlobalModel().state), self.parent_conns, list(i for i in range(self.n_clients)))
                         self.drop_states(range(self.n_clients))
+                        n_cluster = 1
                         
-                        for device in range(self.n_clients):
+                        # 랜덤 샘플링
+                        if re_cluster == 0:
                             for _ in range(3):
-                                self.states[device], step_dict[device], _, _ = self.parent_conns[device].recv()
+                                indice = random.sample(range(self.n_clients), max(1, int(self.n_clients * self.args.frac)))
+                                print(f"=================== selected devices : {indice} ===================")
+                                self.states.clear()
+                                step_dict.clear()
+                                buffer = {}
+                                
+                                while len(list(self.states.values())) < self.n_clients:
+                                    for device in range(self.n_clients):
+                                        while self.parent_conns[device].poll(): 
+                                            self.states[device], _, _ = self.parent_conns[device].recv()
+                                            if device in indice: buffer[device] = self.states[device]
+                                        
+                                res = self.gRPCClient.sendStates(buffer, self.args.aggregator, step_dict, drop)
+                                global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse, res.f1_score
+                                
+                                res = self.gRPCClient.getGlobalModel()
+                                if best_score > res.loss:
+                                    self.updateModel(pickle.loads(res.state), self.parent_conns, list(i for i in range(self.n_clients)))
+                                    best_score = res.loss
+                                
+                                update_counter.counter = 0
+                                update_counter(loss, global_model, path)
+                                
+                                print(f"============ Round {round} | Loss {loss} | Accuracy {accuracy} | selected cluster {cur_cluster} | Time {str(time.time() - s)}  ============")   
+                                f.write(str(round)+","+str(loss)+","+str(accuracy)+","+str(mae)+","+str(mse)+","+str(rse)+","+str(rmse)+","+str(time.time() - s)+"\n")
+                                round += 1             
                         
-                        similarity_scores = calc_scores(range(self.n_clients), self.states)
-                        linked = linkage(squareform(similarity_scores), method='average')
-                        cnt = 0
-                        
-                        res = self.gRPCClient.sendStates(self.states, self.args.aggregator, step_dict)
-                        global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse, res.f1_score
-                        self.updateModel(pickle.loads(self.gRPCClient.getGlobalModel().state), self.parent_conns, list(i for i in range(self.n_clients)))
+                        similarity_scores = calc_scores(range(self.n_clients), labels_dict) if re_cluster else calc_scores(range(self.n_clients), self.states)
+                        linked = linkage(squareform(similarity_scores), method='average') # 메서드 찾기
+                        re_cluster = 0 if re_cluster else 1
                     
-                    patience= [i for i in range(10)]
-                    
+                    patience= [i + 1 for i in range(self.args.max_cluster + 1)]
                     selected_cluster_idx, idx, n_cluster = 0, 0, n_cluster + 1
                     update_counter.patience = patience[n_cluster]
                     update_counter.update = False
@@ -298,6 +313,11 @@ class Exp(object):
                 updates = {}
                 flag = True
                 
+                # 아웃라이어 제거 임시용 
+                # cluster updated. dict_items([(2, [0, 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19]), (3, [3]), (1, [5, 14]), (4, [15])]) 아웃라이어는 사전에 쳐내야할 듯
+                if len(cluster_dict[cur_cluster]) < 2:
+                    pass_list.append(selected_cluster_idx)
+                
                 # loss 값이 낮으면 한 번 건너 뜀
                 while selected_cluster_idx in pass_list: 
                     pass_list.remove(selected_cluster_idx)
@@ -307,7 +327,7 @@ class Exp(object):
                 while True:
                     for device in cluster_dict[cur_cluster]:
                         while self.parent_conns[device].poll(): 
-                            self.states[device], step_dict[device], l, _ = self.parent_conns[device].recv()  # 데이터 받기
+                            self.states[device],  l, _ = self.parent_conns[device].recv()  # 데이터 받기
                             device_cluster = device_dict[device]
                             
                             if res_cluster.get(device_cluster) is None:
@@ -337,14 +357,13 @@ class Exp(object):
                                 updates[cluster] = update_dict[cluster]
                             break
                 
-                res = self.gRPCClient.sendStates(self.states, self.args.aggregator, step_dict)
+                res = self.gRPCClient.sendStates(self.states, self.args.aggregator, step_dict, drop)
                 global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse, res.f1_score
                 best_score = min(loss, best_score)
                 
-                print(f"============ Round {round} | Loss {loss} | Accuracy {accuracy} | selected cluster {cur_cluster} | Time {str(time.time() - s)}  ============")
+                print(f"============ Round {round} | Cluster {cur_cluster} | Loss {loss} | Accuracy {accuracy} | Time {str(time.time() - s)}  ============")
                 
                 f.write(str(round)+","+str(loss)+","+str(accuracy)+","+str(mae)+","+str(mse)+","+str(rse)+","+str(rmse)+","+str(time.time() - s)+"\n")
-                
                 
                 global_update = True
                 if selected_cluster_idx + 1 < n_cluster:
@@ -366,22 +385,19 @@ class Exp(object):
                         round = 9999999
                         break
                 
-                if loss > best_score and protection == False:
+                if loss > best_score:
                     pass_list.append(selected_cluster_idx)
                 
-                if self.args.update_counter == 1 and protection == False:
-                    update_counter(loss, global_model, path)
+                update_counter(loss, global_model, path)
+                    
+                if protection == True: update_counter.counter = 0
                 
                 selected_cluster_idx = (selected_cluster_idx + 1) % n_cluster
                 if selected_cluster_idx == 0: protection = False # 한바퀴 돌면 protection 끄기
                 step_dict.clear()
                 self.states.clear()
+                pass_list.clear()
                 round += 1
-                
-                # # drop states
-                # devices = []
-                # devices.extend(list(cluster_dict[cur_cluster]))
-                # self.drop_states(devices)
                 
         print(f"Train terminated. | time: {time.time() - s}")
         
@@ -399,3 +415,4 @@ class Exp(object):
         for device in devices:
             while self.parent_conns[device].poll(): 
                 self.parent_conns[device].recv()
+        print(f"Drop complete.")
