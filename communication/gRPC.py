@@ -10,7 +10,6 @@ import copy
 import traceback
 from model import CNN, MobileNet    
 from utils.metrics import *
-from torchmetrics.classification import MulticlassF1Score
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
@@ -32,10 +31,6 @@ class gRPCClient(object):
         # 스텁 생성
         self.stub = pb2_grpc.grpcServiceStub(self.channel)
 
-    def randomSample(self, num_clients, num_samples):
-        request = pb2.RequestRandomIndices(num_clients=num_clients, num_samples=num_samples)
-        return self.stub.randomSample(request)
-    
     def sendStates(self, states, setting, weights, drop):
         try:
             serialized_states = pickle.dumps(states)
@@ -83,31 +78,20 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
                     test_dataset = datasets.EMNIST(root='../datasets/EMNIST/', split = 'byclass', train=False, download=True, transform=transforms.ToTensor())
                     self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
                     self.model = CNN(1, n_class) if model_name == "cnn" else MobileNet(1, 1, n_class)
+                elif data == "FashionMNIST":
+                    self.train_dataset = datasets.FashionMNIST(root='../datasets/FashionMNIST/', train=True, download=True,  transform=transforms.ToTensor())
+                    test_dataset = datasets.FashionMNIST(root='../datasets/FashionMNIST/', train=False, download=True, transform=transforms.ToTensor())
+                    self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
+                    self.model = CNN(1, n_class) if model_name == "cnn" else MobileNet(1, 1, n_class)
             
-                self.f1_metric = MulticlassF1Score(num_classes=n_class, average='macro').to(self.device)
-                
         except Exception as e:
             print(e)
             context.set_details('Failed to deserialize states')
             context.set_code(grpc.StatusCode.INTERNAL)
             return pb2.EmptyResponse(message="Error")
-            
+        
         return pb2.EmptyResponse(message="success")
         
-    def randomSample(self, request, context):
-        # 기존과 동일한 randomSample 구현
-        num_clients = request.num_clients
-        num_samples = request.num_samples
-
-        if num_samples > num_clients:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details('샘플 수는 디바이스 수보다 클 수 없습니다.')
-            return pb2.ResponseRandomIndices()
-
-        sampled_indices = random.sample(range(num_clients), num_samples)
-        print(sampled_indices)
-        return pb2.ResponseRandomIndices(device_indices=sampled_indices)
-
     def valid(self, val_model):    
         self.model.to(self.device)
         self.model.load_state_dict(val_model)
@@ -138,9 +122,6 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
                 total += target.size(0)
                 correct += (predicted == target).sum().item()
                 
-                # F1 Score 누적
-                self.f1_metric.update(predicted, target) 
-        
         # 평균 손실 및 정확도 계산
         avg_loss = total_loss / total
         accuracy = correct / total
@@ -148,9 +129,8 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
         avg_mse = mse / total        
         avg_rse = rse / total        
         avg_rmse = rmse / total     
-        f1_score = self.f1_metric.compute()
 
-        return {"loss" : avg_loss, "accuracy" : accuracy, "mae" : avg_mae, "mse" : avg_mse, "rse" : avg_rse, "rmse" : avg_rmse, "f1_score": f1_score}
+        return {"loss" : avg_loss, "accuracy" : accuracy, "mae" : avg_mae, "mse" : avg_mse, "rse" : avg_rse, "rmse" : avg_rmse}
     
     def sendState(self, request, context):
         try:
@@ -170,14 +150,14 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
                 drop_size = max(1, int(Beta * len(list(client_states.values()))))
                 for device in list(client_states.keys()):
                     val = self.valid(model_state)
-                    weight_dict[device] = val["f1_score"]
+                    weight_dict[device] = val["loss"]
                 
                 # 성능이 낮은 일부 디바이스 제거 (기준: Beta) 
                 d = sorted(weight_dict.items(), key=lambda x: x[1])
                 for _ in range(drop_size):
                     device = d.pop(0)[0]
                     client_states.pop(device)
-                    print(f"Drop device {device} | f1_score: {weight_dict[device]}")
+                    print(f"Drop device {device} | loss: {weight_dict[device]}")
             
             # 집계
             for key in keys:
@@ -194,12 +174,13 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
             # 성능 평가
             val = self.valid(model_state) 
             
+            # Global Model과 블렌딩
             if setting == "cluster":
                 if self.global_state is not None and val is not None:
                     best_state = model_state
                     best_loss = val["loss"]
                     if self.val["loss"] < val["loss"]:
-                        for a in [0.6, 0.7, 0.8, 0.9]: # a = 0.7 ~ 0.9 이 중 가장 좋은 값으로 선택
+                        for a in [0.9, 0.8, 0.7, 0.6]: # a = 0.6 ~ 0.9 이 중 가장 좋은 값으로 선택
                             state = copy.deepcopy(model_state)
                                 
                             for key in keys:
@@ -211,6 +192,7 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
                                 best_loss = v["loss"]
                                 best_state = state
                                 val = v
+                            elif a != 0.9: break
                                 
                         model_state = best_state 
                         if self.val["loss"] >= val["loss"]: 
@@ -222,8 +204,8 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
                         self.val = val
                     
                 else:
-                        self.global_state = model_state
-                        self.val = val
+                    self.global_state = model_state
+                    self.val = val
             else:
                 self.global_state = model_state
                 self.val = val
@@ -234,11 +216,11 @@ class grpcServiceServicer(pb2_grpc.grpcServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             return pb2.GlobalState(state=b"Error")
         
-        return pb2.GlobalState(state=pickle.dumps(self.global_state),loss=val["loss"],accuracy=val["accuracy"],mae=val["mae"],mse=val["mse"],rse=val["rse"],rmse=val["rmse"],f1_score=val["f1_score"])
+        return pb2.GlobalState(state=pickle.dumps(self.global_state),loss=val["loss"],accuracy=val["accuracy"],mae=val["mae"],mse=val["mse"],rse=val["rse"],rmse=val["rmse"])
     
     def getGlobalModel(self, request, context):
         val = self.val
-        return pb2.GlobalState(state=pickle.dumps(self.global_state),loss=val["loss"],accuracy=val["accuracy"],mae=val["mae"],mse=val["mse"],rse=val["rse"],rmse=val["rmse"],f1_score=val["f1_score"])
+        return pb2.GlobalState(state=pickle.dumps(self.global_state),loss=val["loss"],accuracy=val["accuracy"],mae=val["mae"],mse=val["mse"],rse=val["rse"],rmse=val["rmse"])
         
 # gRPC server
 def serve(MAX_MESSAGE_LENGTH, PORT):

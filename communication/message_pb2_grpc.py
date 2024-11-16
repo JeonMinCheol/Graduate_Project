@@ -24,11 +24,6 @@ class grpcServiceStub(object):
                 request_serializer=message__pb2.clientInformation.SerializeToString,
                 response_deserializer=message__pb2.EmptyResponse.FromString,
                 )
-        self.randomSample = channel.unary_unary(
-                '/message.grpcService/randomSample',
-                request_serializer=message__pb2.RequestRandomIndices.SerializeToString,
-                response_deserializer=message__pb2.ResponseRandomIndices.FromString,
-                )
         self.getGlobalModel = channel.unary_unary(
                 '/message.grpcService/getGlobalModel',
                 request_serializer=message__pb2.EmptyResponse.SerializeToString,
@@ -46,12 +41,6 @@ class grpcServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def valSetup(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def randomSample(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -75,11 +64,6 @@ def add_grpcServiceServicer_to_server(servicer, server):
                     servicer.valSetup,
                     request_deserializer=message__pb2.clientInformation.FromString,
                     response_serializer=message__pb2.EmptyResponse.SerializeToString,
-            ),
-            'randomSample': grpc.unary_unary_rpc_method_handler(
-                    servicer.randomSample,
-                    request_deserializer=message__pb2.RequestRandomIndices.FromString,
-                    response_serializer=message__pb2.ResponseRandomIndices.SerializeToString,
             ),
             'getGlobalModel': grpc.unary_unary_rpc_method_handler(
                     servicer.getGlobalModel,
@@ -127,23 +111,6 @@ class grpcService(object):
         return grpc.experimental.unary_unary(request, target, '/message.grpcService/valSetup',
             message__pb2.clientInformation.SerializeToString,
             message__pb2.EmptyResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
-
-    @staticmethod
-    def randomSample(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/message.grpcService/randomSample',
-            message__pb2.RequestRandomIndices.SerializeToString,
-            message__pb2.ResponseRandomIndices.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

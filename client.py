@@ -29,7 +29,6 @@ class Client:
             if self.args.is_testing:
                 setting.append([i * 0.002, i * 0.05, self.args.batch_size])
                 continue
-            
             setting.append([0.2 * i, i * 0.05, self.args.batch_size])
         return setting
             

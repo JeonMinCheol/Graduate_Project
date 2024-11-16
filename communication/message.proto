@@ -5,7 +5,6 @@ package message;
 service grpcService{
  rpc sendState(SelectedStates) returns (GlobalState) {}
  rpc valSetup(clientInformation) returns (EmptyResponse) {}
- rpc randomSample(RequestRandomIndices) returns (ResponseRandomIndices) {}
  rpc getGlobalModel(EmptyResponse) returns (GlobalState) {}
 }
 
@@ -34,14 +33,4 @@ message GlobalState {
   float mse = 5;
   float rse = 6;
   float rmse = 7;
-  float f1_score = 8;
-}
-
-message RequestRandomIndices {
-  int32 num_clients = 1;  // 디바이스 개수
-  int32 num_samples = 2;  // 샘플링할 개수
-}
-
-message ResponseRandomIndices {
-  repeated int32 device_indices = 1;  // 선택된 디바이스 인덱스 리스트
 }

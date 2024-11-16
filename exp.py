@@ -32,21 +32,19 @@ class Exp(object):
         self.epoch = self.args.n_client_epochs
         self.patience = 0
         self.n_clients = self.args.n_clients
+        self.n_class = self.args.n_class
         self.mu = self.args.mu
-        self.eps = 1e-5
         self.processes = []
-        self.threads = []
         self.parent_conns = []
         self.device_dataloaders = []
         self.device_subset = []
         self.start_events = []
-        self.states = []
-        self.n_class = self.args.n_class
-        self.threshold = 15
-        torch.cuda.empty_cache()
-        print(args)
-        self.serve()
+        self.states = {}
         self.Client._printClients()
+        self.serve()
+        print(args)
+        
+        torch.cuda.empty_cache()
         
         transform = transforms.Compose([
             transforms.ToTensor(),  # 이미지를 PyTorch Tensor로 변환 (0~255 값을 0~1로 스케일링)
@@ -62,24 +60,12 @@ class Exp(object):
         elif self.args.data == "EMNIST":
             self.train_dataset = datasets.EMNIST(root='../datasets/EMNIST/', split = 'byclass', train=True, download=True,  transform=transforms.ToTensor())
             
-    def receiveParam(self, conn, states):
-        receiver_thread = threading.Thread(target=states.append(conn.recv()))
-        receiver_thread.start()  
-    
     def serve(self):
         mp.set_start_method('spawn', force=True)
         p = mp.Process(target=grpc.serve, args=(2000 * 1024 * 1024, self.args.port))
         self.server = p
         p.start()
-    
-    def clearEnv(self):
-        self.processes = []
-        self.threads = []
-        self.parent_conns = []
-        self.device_dataloaders = []
-        self.stop_events = []
-        self.states = {}
-    
+
     def createClients(self, clients):        
         # 클라이언트별로 프로세스 생성
         for idx in range(self.n_clients):
@@ -120,7 +106,6 @@ class Exp(object):
     
     def train(self, setting):
     # 멀티프로세싱 설정 (한 번만 호출)
-        self.clearEnv()
         f = open(f"../metrics/results/{self.args.aggregator}/{self.args.aggregator}_{self.args.data}_{self.args.model_name}_{'non_iid' if self.args.non_iid else 'iid'}.csv", "a")
         f.write("round, avg_loss, avg_accuracy, avg_mae, avg_mse, avg_rae, avg_rmse, time\n")
         early_stopping = EarlyStopping(patience = self.args.patience, verbose=True)
@@ -177,7 +162,7 @@ class Exp(object):
                     
                 if len(self.states.keys()) >= len(indice):
                     res = self.gRPCClient.sendStates(self.states, self.args.aggregator, step_dict, False)
-                    global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse, res.f1_score
+                    global_model, loss, accuracy, mae, mse, rse, rmse = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse
                 
                     print(f"============ Round {round} | Loss {loss} | Accuracy {accuracy} | Time {str(time.time() - s)} ============")
                     
@@ -206,7 +191,6 @@ class Exp(object):
             device_dict = {} # device: cluster
             labels_dict = {} # device: labels
             times_dict = {} # device: time
-            update_dict = {} # cluster: update 
             pass_list = [] # 여기에 있는 클러스터는 업데이트 한 번 건너 뜀
             re_cluster = 0
             drop = False
@@ -232,12 +216,11 @@ class Exp(object):
                 if round == update_round or update_counter.update:
                     if update_counter.update and n_cluster >= self.args.max_cluster:
                         print("재 클러스터")
-                        # drop = True
                         
                         # 최적 모델 뿌려줌
                         self.updateModel(pickle.loads(self.gRPCClient.getGlobalModel().state), self.parent_conns, list(i for i in range(self.n_clients)))
                         self.drop_states(range(self.n_clients))
-                        n_cluster = 1
+                        n_cluster = self.args.n_cluster - 1
                         
                         # 랜덤 샘플링
                         if re_cluster == 0:
@@ -255,7 +238,7 @@ class Exp(object):
                                             if device in indice: buffer[device] = self.states[device]
                                         
                                 res = self.gRPCClient.sendStates(buffer, self.args.aggregator, step_dict, drop)
-                                global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse, res.f1_score
+                                global_model, loss, accuracy, mae, mse, rse, rmse = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse
                                 
                                 res = self.gRPCClient.getGlobalModel()
                                 if best_score > res.loss:
@@ -279,44 +262,42 @@ class Exp(object):
                     update_counter.update = False
                     update_counter.counter = 0
                     protection = True # 업데이트 직후 한 번만 보호
-                    cluster_dict.clear(); device_dict.clear(); update_dict.clear(); pass_list.clear()
+                    schedule = []
+                    max_time ={}
+                    cluster_dict.clear(); device_dict.clear(); pass_list.clear()
                     
                     # 클러스터 분할
                     cluster_labels = fcluster(linked, n_cluster , criterion='maxclust') # device, cluster
                     
                     # 클러스터 스케줄링
-                    max_time ={}
                     for device, cluster in enumerate(cluster_labels):
                         if cluster_dict.get(cluster) is None:
                             cluster_dict[cluster] = [device]  
                         elif device not in cluster_dict[cluster]: 
-                            x = cluster_dict[cluster]
-                            x.append(device)
-                            cluster_dict[cluster] = x
+                            cluster_devices = cluster_dict[cluster]
+                            cluster_devices.append(device)
+                            cluster_dict[cluster] = cluster_devices
                             
                         device_dict[device] = cluster
                         max_time[cluster] = times_dict[device] if max_time.get(cluster) is None else max(max_time[cluster], times_dict[device])
                     
-                    schedule = [] # 클러스터 스케줄
-                    for i in range(n_cluster):
+                    for _ in range(n_cluster):
                         min_idx = np.argmin(list(max_time.values()))
                         cluster = list(max_time.keys())[min_idx]
                         schedule.append(cluster)
                         max_time.pop(cluster)
-                        update_dict[cluster] = 0
                         
                     print(f"cluster updated. {cluster_dict.items()}")
                     
                 # 데이터 받아오기 / 나중에 클러스터 버퍼로 리팩터링하기
                 cur_cluster = schedule[selected_cluster_idx]
-                res_cluster = {}
-                updates = {}
-                flag = True
+                global_update, flag = True, True
+                response = {}
                 
                 # 아웃라이어 제거 임시용 
                 # cluster updated. dict_items([(2, [0, 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19]), (3, [3]), (1, [5, 14]), (4, [15])]) 아웃라이어는 사전에 쳐내야할 듯
-                if len(cluster_dict[cur_cluster]) < 2:
-                    pass_list.append(selected_cluster_idx)
+                # if len(cluster_dict[cur_cluster]) < 2:
+                #     pass_list.append(selected_cluster_idx)
                 
                 # loss 값이 낮으면 한 번 건너 뜀
                 while selected_cluster_idx in pass_list: 
@@ -324,56 +305,56 @@ class Exp(object):
                     selected_cluster_idx = (selected_cluster_idx + 1) % n_cluster
                     cur_cluster = schedule[selected_cluster_idx]
                 
+                # 클러스터에 속한 디바이스로부터 데이터를 받기
                 while True:
                     for device in cluster_dict[cur_cluster]:
                         while self.parent_conns[device].poll(): 
-                            self.states[device],  l, _ = self.parent_conns[device].recv()  # 데이터 받기
-                            device_cluster = device_dict[device]
+                            self.states[device],  _, _ = self.parent_conns[device].recv() 
+                            device_cluster = device_dict[device] # {device: cluster}
                             
-                            if res_cluster.get(device_cluster) is None:
-                                res_cluster[device_cluster] = [device]  
-                                
-                            elif device not in res_cluster[device_cluster]: 
-                                x = res_cluster[device_cluster] 
+                            if response.get(device_cluster) is None:
+                                response[device_cluster] = [device]  
+                            
+                            elif device not in response[device_cluster]: 
+                                x = response[device_cluster] 
                                 x.append(device)
-                                res_cluster[device_cluster] = x
-                            
-                    if res_cluster.get(cur_cluster) is not None:
+                                response[device_cluster] = x
+                                
+                    # 클러스터에 속한 디바이스로부터 데이터를 전부 받았는지 확인.
+                    if response.get(cur_cluster) is not None:
                         flag = True
-                        for cluster, devices in list(res_cluster.items()):
+                        for cluster, devices in list(response.items()):
                             if len(cluster_dict[cluster]) != len(devices):
                                 flag = False
                                 break
                             
                         # 클러스터 데이터를 전부 받음.
                         if flag: 
-                            # 이미 다 받았지만 혹시 모르니 한 번더 업데이트
+                            # 이미 다 받았지만 전체적으로 한 번더 업데이트
                             while self.parent_conns[device].poll(): 
-                                self.states[device], step_dict[device], l, _ = self.parent_conns[device].recv()  # 데이터 받기
+                                self.states[device], step_dict[device], _, _ = self.parent_conns[device].recv() 
                                 device_cluster = device_dict[device]
-                            
-                            for cluster in list(res_cluster.keys()):
-                                update_dict[cluster] = update_dict[cluster] + 1
-                                updates[cluster] = update_dict[cluster]
                             break
                 
                 res = self.gRPCClient.sendStates(self.states, self.args.aggregator, step_dict, drop)
-                global_model, loss, accuracy, mae, mse, rse, rmse, f1_score = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse, res.f1_score
+                global_model, loss, accuracy, mae, mse, rse, rmse = pickle.loads(res.state), res.loss, res.accuracy, res.mae, res.mse, res.rse, res.rmse
                 best_score = min(loss, best_score)
                 
                 print(f"============ Round {round} | Cluster {cur_cluster} | Loss {loss} | Accuracy {accuracy} | Time {str(time.time() - s)}  ============")
                 
                 f.write(str(round)+","+str(loss)+","+str(accuracy)+","+str(mae)+","+str(mse)+","+str(rse)+","+str(rmse)+","+str(time.time() - s)+"\n")
                 
-                global_update = True
+                # 스케줄링된 디바이스가 모두 pass_list에 속해있는지 확인
                 if selected_cluster_idx + 1 < n_cluster:
                     for x in (selected_cluster_idx + 1, n_cluster):
                         if x not in pass_list:
                             global_update = False
                             break
-                    
-                if global_update or selected_cluster_idx == n_cluster - 1: # 한 바퀴 돌면 전체 업데이트
+                
+                 # 한 바퀴 돌면 전체 업데이트
+                if global_update or selected_cluster_idx == n_cluster - 1:
                     self.updateModel(pickle.loads(self.gRPCClient.getGlobalModel().state), self.parent_conns, list(i for i in range(self.n_clients)))
+                    protection = False
                 else:
                     self.updateModel(global_model, self.parent_conns, list(self.states.keys()))
                     
@@ -393,10 +374,7 @@ class Exp(object):
                 if protection == True: update_counter.counter = 0
                 
                 selected_cluster_idx = (selected_cluster_idx + 1) % n_cluster
-                if selected_cluster_idx == 0: protection = False # 한바퀴 돌면 protection 끄기
-                step_dict.clear()
-                self.states.clear()
-                pass_list.clear()
+                step_dict.clear(); self.states.clear(); pass_list.clear()
                 round += 1
                 
         print(f"Train terminated. | time: {time.time() - s}")
