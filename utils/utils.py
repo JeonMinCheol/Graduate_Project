@@ -26,14 +26,13 @@ def arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--core", type=str, default="163.180.117.36")
     parser.add_argument("--host", type=str, default="localhost")
+    parser.add_argument("--port", type=int, default=50051)
 
     parser.add_argument("--data_root", type=str, default="../datasets/")
     parser.add_argument("--data", type=str, default="cifar10")
     parser.add_argument("--model_name", type=str, default="cnn")
     parser.add_argument("--aggregator", type=str, default="fedavg")
     parser.add_argument("--shards", type=int, default=2)
-    parser.add_argument("--is_testing", type=int, default=0)
-    parser.add_argument("--port", type=int, default=50051)
 
     parser.add_argument("--n_clients", type=int, default=14)
     parser.add_argument("--n_class", type=int, default=26)
@@ -43,7 +42,6 @@ def arg_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--patience", type=int, default=100)
-    parser.add_argument("--eta", type=float, default=0)
     parser.add_argument("--clients_per_rounds", type=int, default=5)
     parser.add_argument("--n_client_epochs", type=int, default=5)
     parser.add_argument("--optim", type=str, default="sgd")
@@ -53,15 +51,13 @@ def arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--update_counter", type=int, default=1)
     parser.add_argument("--non_iid", type=int, default=0)
     parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--is_testing", type=int, default=0)
     
     # Cluster
     parser.add_argument("--n_cluster", type=int, default=2)
 
     # FedProx
     parser.add_argument('--mu', type=float, default=0.3, help='proximal term constant')
-    
-    # FedNova
-    parser.add_argument("--rho", type=float, default=0.9)
     
     # GPU
     parser.add_argument('--use_gpu', action='store_true', help='use gpu')

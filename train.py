@@ -106,7 +106,6 @@ def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_
     device = f"cuda:{device_id}" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
     model.train()
-    global_model = copy.deepcopy(model)
     train_round, all_labels = 0, None
     label_counts = []
     
@@ -121,7 +120,6 @@ def train_local_client_cluster(clients, data_loader, epochs, client_id, conn, n_
             running_loss = 0.0
             while conn.poll(): 
                 state, selected = conn.recv()
-                global_model.load_state_dict(state)
                 if selected:
                     model.load_state_dict(state)
                     model_updated = True

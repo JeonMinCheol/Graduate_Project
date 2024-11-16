@@ -1,7 +1,6 @@
 import torch
 from sklearn.metrics import silhouette_score
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 import math
 import utils.utils as util
 from collections import OrderedDict
